@@ -14,21 +14,25 @@ using System.Net.Http;
 using System.Diagnostics;
 using System.Data.SqlClient;
 using System.Collections;
-using Newtonsoft.Json;
 using System.Runtime.InteropServices;
+using System.Xml;
 using System.Threading;
+using Newtonsoft.Json;
+using Microsoft.Win32;
+using System.Timers;
+using System.Linq;
+using Timer = System.Timers.Timer;
 
 namespace Czx
 {
-    public class Json<T>
+    public static class Json
     {
-        private Json() { }
         /// <summary>
         /// Json写入。
         /// </summary>
         /// <param name="obj">类型</param>
         /// <returns>返回缩进后的 JSON 数据。</returns>
-        public static string WriteJson(T obj)
+        public static string WriteJson<T>(T obj)
         {
             DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(T));
             MemoryStream mstream = new MemoryStream();
@@ -38,14 +42,14 @@ namespace Czx
             mstream.Read(Bytes, 0, (int)mstream.Length);
             mstream.Close();
             mstream.Dispose();
-            return Text.Indent(Encoding.UTF8.GetString(Bytes))[0];
+            return Text.Indent(Encoding.UTF8.GetString(Bytes));
         }
         /// <summary>  
         /// Json读取。
         /// </summary>  
         /// <param name="data">Json数据</param>  
         /// <returns>返回 JSON 反序列化后的数据。</returns>  
-        public static T ReadJson(string data)
+        public static T ReadJson<T>(string data)
         {
             MemoryStream mstream = new MemoryStream(Encoding.UTF8.GetBytes(data));
             DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(T));
@@ -208,6 +212,24 @@ namespace Czx
             FileInfo fi = new FileInfo(path);
             fi.Delete();
         }
+        /// <summary>
+        /// 当前用户的下载路径
+        /// </summary>
+        public static string DownloadPath
+        {
+            get
+            {
+                SHGetKnownFolderPath(new Guid("374DE290-123F-4565-9164-39C4925E467B"), 0, IntPtr.Zero, out string downloads);
+                return downloads + "\\";
+            }
+        }
+        /// <summary>
+        /// Windows没有为“Downloads”文件夹定义CSIDL，所以无法通过Environment.SpecialFolder枚举来获取。
+        /// 请注意，这是一个Vista和更高版本的API，不要试图在XP / 2003或更低版本上调用它。
+        /// 导入shell32.dll，获取Downloads文件夹起源。
+        /// </summary>
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+        static extern int SHGetKnownFolderPath([MarshalAs(UnmanagedType.LPStruct)] Guid rfid, uint dwFlags, IntPtr hToken, out string pszPath);
     }
     public class Text
     {
@@ -216,55 +238,8 @@ namespace Czx
         /// </summary>
         /// <param name="data">数据</param>
         /// <returns>返回不同的缩进后的 JSON 数据。</returns>
-        public static string[] Indent(string data)
+        public static string Indent(string data)
         {
-            List<string> vsList = new List<string>();
-            string Tjson = data;
-            Tjson = Tjson.Replace("[", "[\r\n").Replace("]", "\r\n]").Replace("{", "{\r\n").Replace("}", "\r\n}");
-            Tjson = Tjson.Replace(",", ",\r\n");
-            Tjson = Tjson.Replace(":", ": ");
-            string[] vs = Regex.Split(Tjson, "\\r\\n");
-            string jchar = "  ";
-            int ji = 0;
-            int ji2 = 0;
-            int textIndex = 0;
-            foreach (var item in vs)
-            {
-                if (item.Contains("}"))
-                {
-                    ji--;
-                }
-                if (item.Contains("]"))
-                {
-                    ji2--;
-                }
-                if (textIndex != 0 || vs.Length == textIndex)
-                {
-                    for (int i = 0; i < ji; i++)
-                    {
-                        vs[textIndex] = vs[textIndex].Insert(0, jchar);
-                    }
-                    if (ji2 != 0)
-                    {
-                        vs[textIndex] = vs[textIndex].Insert(0, "  ");
-                    }
-                }
-                if (item.Contains("{"))
-                {
-                    ji++;
-                }
-                if (item.Contains("["))
-                {
-                    ji2++;
-                }
-                textIndex++;
-            }
-            StringBuilder stringBuilder = new StringBuilder();
-            foreach (var item in vs)
-            {
-                stringBuilder.AppendLine(item);
-            }
-            vsList.Add(stringBuilder.ToString());
             JsonSerializer serializer = new JsonSerializer();
             TextReader tr = new StringReader(data);
             JsonTextReader jtr = new JsonTextReader(tr);
@@ -274,18 +249,14 @@ namespace Czx
                 StringWriter textWriter = new StringWriter();
                 JsonTextWriter jsonWriter = new JsonTextWriter(textWriter)
                 {
-                    Formatting = Formatting.Indented,
+                    Formatting = Newtonsoft.Json.Formatting.Indented,
                     Indentation = 2,
                     IndentChar = ' '
                 };
                 serializer.Serialize(jsonWriter, obj);
-                vsList.Add(textWriter.ToString());
+                return textWriter.ToString();
             }
-            else
-            {
-                vsList.Add(data);
-            }
-            return vsList.ToArray();
+            return data;
         }
         /// <summary>
         /// 将文本全部转换为大写。
@@ -402,21 +373,21 @@ namespace Czx.Info
         /// <summary>
         /// 版本。
         /// </summary>
-        public static string version
+        public static string Version
         {
             get { return "1.0.30"; }
         }
         /// <summary>
         /// 作者。
         /// </summary>
-        public static string writer
+        public static string Writer
         {
             get { return "CZX"; }
         }
         /// <summary>
         /// 获取操作系统版本。
         /// </summary>
-        public static string getOSVersion
+        public static string OSVersion
         {
             get { return Environment.OSVersion.VersionString; }
         }
@@ -431,7 +402,7 @@ namespace Czx.Info
                 string str = "";
                 ManagementClass mc = new ManagementClass("Win32_NetworkAdapterConfiguration");
                 ManagementObjectCollection moc = mc.GetInstances();
-                foreach (ManagementObject mo in moc)
+                foreach (ManagementObject mo in moc.Cast<ManagementObject>())
                 {
                     if ((bool)mo["IPEnabled"] == true)
                     {
@@ -676,7 +647,12 @@ namespace Czx.Forms
             mainForm.ForeColor = Color.Black;
             mainForm.Text = (runIndex > 0) ? $"New Title ({runIndex})" : "New Title";
             runIndex++;
+            mainForm.Disposed += (object sender, EventArgs e) =>
+            {
+                runIndex--;
+            };
         }
+
         /// <summary>
         /// 显示窗体
         /// 调用此方法体可能阻塞主线程。
@@ -694,7 +670,7 @@ namespace Czx.Forms
             mainForm.Show();
         }
     }
-    public class BlockMultiOpen
+    public static class BlockMultiOpen
     {
         /// <summary>
         /// 阻止应用多开。由特性进行执行。
@@ -742,26 +718,87 @@ namespace Czx.Forms
         }
     }
 }
+namespace Czx.Forms.Administration
+{
+    public class Administration
+    {
+        /// <summary>
+        /// 获取当前用户是否为管理员。
+        /// </summary>
+        public static bool IsAdministrator
+        {
+            get
+            {
+                System.Security.Principal.WindowsIdentity identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                System.Security.Principal.WindowsPrincipal principal = new System.Security.Principal.WindowsPrincipal(identity);
+                return principal.IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            }
+        }
+        /// <summary>
+        /// 启动管理员身份。
+        /// </summary>
+        /// <param name="workingDirectory">运行根目录。</param>
+        /// <param name="fileName">运行目录。</param>
+        /// <param name="isExit">如果不是管理员身份，则退出。</param>
+        public static void RunAdministrator(string workingDirectory, string fileName, bool isExit)
+        {
+            if (IsAdministrator)
+            {
+                return;
+            }
+            ProcessStartInfo startInfo = new ProcessStartInfo
+            {
+                WorkingDirectory = workingDirectory,
+                FileName = fileName,
+                Verb = "runas"
+            };
+            try
+            {
+                Process.Start(startInfo);
+                Environment.Exit(1);
+            }
+            catch
+            {
+                if (isExit)
+                {
+                    Environment.Exit(1);
+                }
+            }
+        }
+        /// <summary>
+        /// 启动管理员身份。
+        /// </summary>
+        /// <param name="isExit">如果不是管理员身份，则退出。</param>
+        public static void RunAdministrator(bool isExit)
+        {
+            RunAdministrator(Environment.CurrentDirectory, Application.ExecutablePath, isExit);
+        }
+        /// <summary>
+        /// 如果不是管理员身份，则退出。
+        /// </summary>
+        public static void RunAdministrator()
+        {
+            RunAdministrator(true);
+        }
+    }
+}
 namespace Czx.Https.Client
 {
-    class Client : HttpClient
+    public class WebClient
     {
-        public HttpClient client;
-        public CookieContainer cookieContainer;
-        public HttpClientHandler clientHandler;
-        public Dictionary<string, string> cookieHeaders;
+        private CookieContainer cookieContainer;
+        private WebHeaderCollection headers;
+
+        public CookieContainer CookieContainer { get => cookieContainer; set => cookieContainer = value; }
+        public WebHeaderCollection Headers { get => headers; set => headers = value; }
+
         /// <summary>
         /// 初始化 Client。如需要特性，可添加特性来初始化。
         /// </summary>
-        public Client()
+        public WebClient()
         {
             cookieContainer = new CookieContainer();
-            clientHandler = new HttpClientHandler()
-            {
-                CookieContainer = cookieContainer
-            };
-            client = new HttpClient(clientHandler);
-            cookieHeaders = new Dictionary<string, string>();
+            headers = new WebHeaderCollection();
             StackTrace trace = new StackTrace();
             CookieAttribute cookieAttribute = null;
             foreach (var item in trace.GetFrame(1).GetMethod().GetCustomAttributes(true))
@@ -771,7 +808,7 @@ namespace Czx.Https.Client
                     if (item.GetType() == typeof(CookieAttribute))
                     {
                         cookieAttribute = (CookieAttribute)item;
-                        cookieContainer.Add(new Cookie(((CookieAttribute)item).CookieName, ((CookieAttribute)item).CookieValue, ((CookieAttribute)item).CookiePath, ((CookieAttribute)item).CookieDomain));
+                        CookieContainer.Add(new Cookie(((CookieAttribute)item).CookieName, ((CookieAttribute)item).CookieValue, ((CookieAttribute)item).CookiePath, ((CookieAttribute)item).CookieDomain));
                     }
                 }
             }
@@ -783,11 +820,26 @@ namespace Czx.Https.Client
                     {
                         if (item.GetType() == typeof(CookieAttribute))
                         {
-                            cookieContainer.Add(new Cookie(((CookieAttribute)item).CookieName, ((CookieAttribute)item).CookieValue, ((CookieAttribute)item).CookiePath, ((CookieAttribute)item).CookieDomain));
+                            CookieContainer.Add(new Cookie(((CookieAttribute)item).CookieName, ((CookieAttribute)item).CookieValue, ((CookieAttribute)item).CookiePath, ((CookieAttribute)item).CookieDomain));
                         }
                     }
                 }
             }
+        }
+        /// <summary>
+        /// 下载文件，并收集文件流信息。
+        /// </summary>
+        /// <param name="uri">网址。</param>
+        /// <param name="path">保存路径。</param>
+        /// <returns></returns>
+        public WebFileInfo DownloadFile(string uri,string path)
+        {
+            WebFileInfo fileInfo = new WebFileInfo
+            {
+                CookieContainer = CookieContainer
+            };
+            fileInfo.DownloadFile(uri, path);
+            return fileInfo;
         }
         /// <summary>
         /// 添加 Cookie
@@ -796,23 +848,237 @@ namespace Czx.Https.Client
         /// <param name="value">Cookie 值</param>
         /// <param name="path">Cookie 路径</param>
         /// <param name="domain">Cookie 领域</param>
-        public void AddCookie(string name, string value,string path,string domain)
+        public void AddCookie(string name, string value, string path, string domain)
         {
-            cookieContainer.Add(new Cookie(name, value, path, domain));
+            CookieContainer.Add(new Cookie(name, value, path, domain));
         }
+    }
+    public class WebFileInfo
+    {
+        public CookieContainer CookieContainer;
+        public WebHeaderCollection Headers;
+        private int lastLength = 0;
+        private int nowLength = 0;
+        private Thread thread;
+        private Timer timer = new Timer();
+        /// <summary>
+        /// 下载文件，并收集文件流信息。
+        /// </summary>
+        /// <param name="uri">网址。</param>
+        /// <param name="path">保存路径。</param>
+        public void DownloadFile(string uri, string path)
+        {
+            if (string.IsNullOrEmpty(uri))
+            {
+                isCompleted = true;
+                DownloadCompleted?.Invoke();
+                return;
+            }
+            thread = new Thread(new ThreadStart(() =>
+            {
+                try
+                {
+                    HttpWebRequest webRequest = WebRequest.CreateHttp(uri);
+                    webRequest.CookieContainer = CookieContainer;
+                    webRequest.Headers = Headers;
+                    webRequest.KeepAlive = true;
+                    webRequest.Method = "GET";
+                    webRequest.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.4985.0 Safari/537.36 Edg/102.0.1235.0";
+                    HttpWebResponse httpWebResponse = (HttpWebResponse)webRequest.GetResponse();
+                    long totalBytes = httpWebResponse.ContentLength;
+                    contentLength = (int)totalBytes;
+                    string newFileName = "";
+                    foreach (var item in httpWebResponse.Headers.AllKeys)
+                    {
+                        foreach (var item2 in httpWebResponse.Headers.GetValues(item))
+                        {
+                            if (item2.Contains(".exe"))
+                            {
+                                newFileName = item2.Substring(item2.LastIndexOf('='));
+                                break;
+                            }
+                        }
+                    }
+                    Stream stream = httpWebResponse.GetResponseStream();
+                    FileStream fileStream = null;
+                    StringBuilder stringBuilder = new StringBuilder();
+                    stringBuilder.Append(Path.GetDirectoryName(path));
+                    if (!string.IsNullOrEmpty(newFileName))
+                    {
+                        stringBuilder.Append(newFileName);
+                    }
+                    else
+                    {
+                        foreach (var item in Path.GetFileName(path))
+                        {
+                            bool b = true;
+                            foreach (var item2 in Path.GetInvalidFileNameChars())
+                            {
+                                if (item == item2)
+                                {
+                                    b = false;
+                                    continue;
+                                }
+                            }
+                            if (b)
+                            {
+                                stringBuilder.Append(item);
+                            }
+                        }
+                    }
+                    FileName = File.DownloadPath + stringBuilder.ToString().Substring(stringBuilder.ToString().LastIndexOf('=') + 1);
+                    try
+                    {
+                        fileStream = new FileStream(FileName, FileMode.CreateNew);
+                    }
+                    catch
+                    {
+                        for (int i = 1; ; i++)
+                        {
+                            try
+                            {
+                                fileStream = new FileStream(Path.GetDirectoryName(FileName) + "\\" + Path.GetFileNameWithoutExtension(FileName) + $" ({i}).{Path.GetExtension(FileName)}", FileMode.CreateNew);
+                                break;
+                            }
+                            catch { }
+                        }
+                    }
+                    long totalDownloadedByte = 0;
+                    byte[] by = new byte[1024 * 1024];
+                    int osize = stream.Read(by, 0, by.Length);
+                    timer.Interval = 1000;
+                    timer.Elapsed += (s, e) =>
+                    {
+                        SpeedText = $"{(nowLength - lastLength) / 1024} KB/S";
+                        lastLength = nowLength;
+                    };
+                    timer.Start();
+                    while (osize > 0)
+                    {
+                        try
+                        {
+                            if (CanDownload)
+                            {
+                                totalDownloadedByte += osize;
+                                nowLength = (int)totalDownloadedByte;
+                                fileStream.Write(by, 0, osize);
+                                osize = stream.Read(by, 0, by.Length);
+                                value = (int)((double)totalDownloadedByte / (double)totalBytes * 100);
+                                Refesh();
+                                Application.DoEvents();
+                            }
+                        }
+                        catch
+                        {
+                            fileStream.Close();
+                            stream.Close();
+                            fileStream.Dispose();
+                            stream.Dispose();
+                            isCompleted = true;
+                            if (File.Exists(FileName))
+                            {
+                                File.Delete(FileName);
+                            }
+                            break;
+                        }
+                    }
+                    webRequest.Abort();
+                    fileStream.Close();
+                    stream.Close();
+                    fileStream.Dispose();
+                    stream.Dispose();
+                }
+                catch { }
+                isCompleted = true;
+                DownloadCompleted();
+            }));
+            thread.Start();
+        }
+        /// <summary>
+        /// 刷新下载信息。
+        /// </summary>
+        public void Refesh()
+        {
+            Downloading?.Invoke();
+        }
+        /// <summary>
+        /// 终止下载。
+        /// </summary>
+        public void ExitDownload()
+        {
+            if (thread != null)
+            {
+                thread.Abort();
+            }
+        }
+        /// <summary>
+        /// 停止下载。
+        /// </summary>
+        public void StopDownload()
+        {
+            timer.Stop();
+            CanDownload = false;
+        }
+        /// <summary>
+        /// 开始下载。
+        /// </summary>
+        public void StartDownload()
+        {
+            timer.Start();
+            CanDownload = true;
+        }
+        private bool CanDownload = true;
+        /// <summary>
+        /// 获取文件是否下载完成。
+        /// </summary>
+        public bool IsCompleted
+        {
+            get => isCompleted;
+        }
+        private bool isCompleted = false;
+        /// <summary>
+        /// 获取文件总大小。
+        /// </summary>
+        public int ContentLength
+        {
+            get => contentLength;
+        }
+        private int contentLength = 0;
+        /// <summary>
+        /// 获取下载进度，0-100。
+        /// </summary>
+        public int Value
+        {
+            get => value;
+        }
+        private int value = 0;
+        public string FileName = "";
+        public string Text = "";
+        public string SpeedText = "";
+        public delegate void DownloadingHandle();
+        public event DownloadingHandle Downloading;
+        public delegate void DownloadCompletedHandle();
+        public event DownloadCompletedHandle DownloadCompleted;
     }
 }
 namespace Czx.Sql
 {
-    public class SqlClient
+    public class SqlClient : IDisposable
     {
         public SqlConnection Connection { get; set; }
         public SqlCommand Command { get; set; }
-        public SqlDataReader Reader
+        public SqlDataReader DataReaderForSql
         {
             get { return reader; }
         }
+        public XmlReader DataReaderForXml
+        {
+            get { return xmlReader; }
+        }
         private SqlDataReader reader;
+        private XmlReader xmlReader;
+        private bool disposedValue;
+
         /// <summary>
         /// 初始化 SQL 客户端
         /// </summary>
@@ -844,6 +1110,7 @@ namespace Czx.Sql
                     }
                 }
             }
+            Connection.Open();
             Command = new SqlCommand();
         }
         /// <summary>
@@ -857,19 +1124,150 @@ namespace Czx.Sql
             Command = new SqlCommand();
         }
         /// <summary>
-        /// 执行语句
+        /// 执行语句，并生成错误信息。
+        /// </summary>
+        /// <param name="commandString">语句。</param>
+        /// <returns>错误信息。</returns>
+        public string Exucute(string commandString)
+        {
+            try
+            {
+                Command.Connection = Connection;
+                Command.CommandText = commandString;
+                Command.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                return ex.Message;
+            }
+            return null;
+        }
+        /// <summary>
+        /// 执行语句，并生成 SqlDataReader 。
+        /// </summary>
+        /// <param name="commandString">语句。</param>
+        /// <returns>SqlDataReader 数据。</returns>
+        public SqlDataReader ExecuteReader(string commandString)
+        {
+            try
+            {
+                if (reader != null && !reader.IsClosed)
+                {
+                    reader.Close();
+                }
+                Command.Connection = Connection;
+                Command.CommandText = commandString;
+                reader = Command.ExecuteReader();
+                return reader;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+        /// <summary>
+        /// 执行语句，并生成结果中的第一行的第一列。
         /// </summary>
         /// <param name="commandString">语句</param>
         /// <returns></returns>
-        public void Exucute(string commandString)
+        public object ExecuteScalar(string commandString)
         {
-            if (!reader.IsClosed)
+            try
             {
+                Command.Connection = Connection;
+                Command.CommandText = commandString;
+                return Command.ExecuteScalar();
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+        /// <summary>
+        /// 执行语句，并生成 XmlReader 。
+        /// </summary>
+        /// <param name="commandString"></param>
+        /// <returns>XmlReader 数据。</returns>
+        public object ExecuteXmlReader(string commandString)
+        {
+            try
+            {
+                Command.Connection = Connection;
+                Command.CommandText = commandString;
+                xmlReader = Command.ExecuteXmlReader();
+                return xmlReader;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+        /// <summary>
+        /// 确定指定的数据库是否存在。
+        /// </summary>
+        /// <param name="databaseName">数据库名。</param>
+        /// <returns></returns>
+        public bool CheckDatabaseExists(string databaseName)
+        {
+            {
+                string sqlCreateDBQuery;
+                bool result;
+                try
+                {
+                    sqlCreateDBQuery = $"SELECT database_id from sys.databases WHERE Name  = '{databaseName}';";
+                    SqlCommand sqlCmd = new SqlCommand(sqlCreateDBQuery, Connection);
+                    object resultObj = sqlCmd.ExecuteScalar();
+                    int databaseID = 0;
+                    if (resultObj != null)
+                    {
+                        int.TryParse(resultObj.ToString(), out databaseID);
+                    }
+                    result = (databaseID > 0);
+                }
+                catch (Exception)
+                {
+                    result = false;
+                }
+                return result;
+            }
+        }
+        /// <summary>
+        /// 确定指定的表是否存在，并确保已选择的数据库。
+        /// </summary>
+        /// <param name="databaseName">数据库名。</param>
+        /// <param name="tableName">表名。</param>
+        /// <returns></returns>
+        public bool CheckTableExists(string tableName)
+        {
+            bool hr = false;
+            try
+            {
+                Command.CommandText = $"select * from sys.tables where name ='{tableName}';";
+                SqlDataReader reader = Command.ExecuteReader();
+                hr = reader.HasRows;
                 reader.Close();
             }
-            Command.Connection = Connection;
-            Command.CommandText = commandString;
-            reader = Command.ExecuteReader();
+            catch { }
+            return hr;
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    Connection.Close();
+                    Connection.Dispose();
+                    Command.Dispose();
+                }
+                disposedValue = true;
+            }
+        }
+        public void Dispose()
+        {
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
         }
     }
 }
@@ -933,10 +1331,19 @@ namespace Czx.Controller
         public static extern int GetCurrentThreadId();
         [DllImport("kernel32.dll")]
         public static extern IntPtr GetModuleHandle(string name);
+        [DllImport("Kernel32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr GetConsoleWindow();
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr GetSystemMenu(IntPtr hWnd, IntPtr bRevert);
+        [DllImport("user32.dll", CharSet = CharSet.Auto)]
+        public static extern IntPtr RemoveMenu(IntPtr hMenu, uint uPosition, uint uFlags);
         [DllImport("kernel32.dll")]
-        public static extern bool AllocConsole(string name);
-        [DllImport("kernel32.dll")]
-        public static extern bool FreeConsole(string name);
+        public static extern bool AllocConsole();
+        [DllImport("Kernel32")]
+        public static extern void FreeConsole();
+        [DllImport("Kernel32")]
+        public static extern void SetConsoleCtrlHandler(HandlerRoutine HandlerRoutine, bool Add);
+        public delegate bool HandlerRoutine(uint dwControlType);
         [DllImport("user32")]
         public static extern int ToAscii(int uVirtKey, int uScanCode, byte[] lpbKeyState, byte[] lpwTransKey, int fuState);
         [DllImport("user32")]
@@ -982,7 +1389,7 @@ namespace Czx.Controller
         {
             this.Point = new Point();
         }
-        public int Start()
+        public void Start()
         {
             if (!canStart)
             {
@@ -998,7 +1405,6 @@ namespace Czx.Controller
                     throw new Exception("安装鼠标钩子失败。");
                 }
                 canStart = false;
-                return hHook;
             }
         }
         public void Stop()
@@ -1028,52 +1434,52 @@ namespace Czx.Controller
                     case WM_LBUTTONDOWN:
                         button = MouseButtons.Left;
                         clickCount = 1;
-                        MouseDownEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseDownEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_RBUTTONDOWN:
                         button = MouseButtons.Right;
                         clickCount = 1;
-                        MouseDownEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseDownEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_MBUTTONDOWN:
                         button = MouseButtons.Middle;
                         clickCount = 1;
-                        MouseDownEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseDownEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_LBUTTONUP:
                         button = MouseButtons.Left;
                         clickCount = 1;
-                        MouseUpEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseUpEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_RBUTTONUP:
                         button = MouseButtons.Right;
                         clickCount = 1;
-                        MouseUpEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseUpEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_MBUTTONUP:
                         button = MouseButtons.Middle;
                         clickCount = 1;
-                        MouseUpEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseUpEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_LBUTTONDBLCLK:
                         button = MouseButtons.Left;
                         clickCount = 1;
-                        MouseClickEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseClickEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_MBUTTONDBLCLK:
                         button = MouseButtons.Middle;
                         clickCount = 1;
-                        MouseClickEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseClickEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_RBUTTONDBLCLK:
                         button = MouseButtons.Right;
                         clickCount = 1;
-                        MouseClickEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseClickEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                     case WM_MOUSEMOVE:
                         button = MouseButtons.None;
                         clickCount = 1;
-                        MouseMoveEvent?.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
+                        MouseMoveEvent.Invoke(this, new MouseEventArgs(button, clickCount, point.X, point.Y, 0));
                         break;
                 }
                 this.Point = new Point(MyMouseHookStruct.pt.X, MyMouseHookStruct.pt.Y);
